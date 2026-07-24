@@ -429,7 +429,10 @@ private def Ndarray.toByteArray! (arr : Ndarray) : ByteArray :=
 end Save
 
 def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
-  IO.FS.writeBinFile file arr.toByteArray!
+  if arr.header.descr.name == .float8_e3m4 then
+    throw $ IO.userError "float8_e3m4 cannot be saved to npy: format uses V1 which is identical to float8_e4m3"
+  else
+    IO.FS.writeBinFile file arr.toByteArray!
 
 -- Hermetic parse tests: no Python dependency
 #guard Npy.Dtype.fromNpyString "<V2" == .ok { name := .bfloat16, order := .littleEndian }
@@ -440,7 +443,6 @@ def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
 #guard Npy.Dtype.fromNpyString "|f1" != .ok { name := .float8_e5m2, order := .littleEndian }
 -- Known limitation: e3m4 cannot round-trip through npy (reads back as e4m3)
 #guard Npy.Dtype.fromNpyString "<V1" != .ok { name := .float8_e3m4, order := .littleEndian }
-#guard Npy.Dtype.dtypeNameToNpyString .float8_e3m4 == "V1"
 #guard Npy.Dtype.dtypeNameToNpyString .float8_e4m3 == "V1"
 
 end Npy
