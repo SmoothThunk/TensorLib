@@ -134,7 +134,7 @@ def intMax (x : Dtype) : Int := match x with
 
 -- Added float16 and bfloat16 so bitwise op know to reject it
 def isFloat (x : Dtype) : Bool := match x with
-| .float16 | .bfloat16 | .float32 | .float64 | .float8_e4m3 | .float8_e3m4 | float8_e5m2 => true
+| .float16 | .bfloat16 | .float32 | .float64 | .float8_e4m3 | .float8_e3m4 | .float8_e5m2 => true
 | _ => false
 
 --! Number of bytes used by each element of the given dtype
