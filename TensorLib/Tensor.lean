@@ -682,7 +682,7 @@ def toNpy (arr : Tensor) : Err Npy.Ndarray :=
     .ok { header, data, startIndex }
 
 -- Panics if the tensor's dtype cannot be serialized to npy (e.g. fp8_e3m4)
-  def toNpy! (arr : Tensor) : Npy.Ndarray := get! $ toNpy arr
+def toNpy! (arr : Tensor) : Npy.Ndarray := get! $ toNpy arr
 
 section Test
 

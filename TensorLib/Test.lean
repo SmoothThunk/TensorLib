@@ -599,7 +599,7 @@ private def testFloat8E3M4EdgeCases : IO Bool := do
   let _ <- IO.FS.removeFile file
   -- Decode 1-byte e3m4 element at offset using extract
   let decode (offset : Nat) : Err Float32 :=
-    Dtype.decodeFloat8E3M4 (arr.data.extract offset (offset + 1))
+  Dtype.decodeFloat8E3M4 (arr.data.extract offset (offset + 1))
   let mut checks : List Bool := []
 
   -- max representable value (15.5)
