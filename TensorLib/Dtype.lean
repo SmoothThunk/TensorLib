@@ -185,6 +185,8 @@ private def joinOrdered (x y : Dtype) : Option Dtype :=
   | .float8_e5m2, .int8 => float8_e5m2
   | .float8_e5m2, .uint8 => float8_e5m2
   | .float8_e5m2, _ => none
+  -- e3m4 follows e4m3's promotion rules
+  -- numpy: result_type(e3m4, int16) = none, matching e4m3 behavior.
   | .float8_e3m4, .float32 => float32
   | .float8_e3m4, .float64 => float64
   | .float8_e3m4, .bool
