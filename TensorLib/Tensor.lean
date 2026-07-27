@@ -672,7 +672,7 @@ and start positions are not included in the .npy file format
 -/
 def toNpy (arr : Tensor) : Err Npy.Ndarray :=
   -- fp8_e3m4 and fp8_e4m3 both serialize to "<V1" in the npy header with no distinguishing
-  -- metadata. Numpy has this limitation too: np.save followed by np.load returns <V1 bytes,
+  -- metadata. Ml_dtypes has this limitation too: np.save followed by np.load returns <V1 bytes,
   -- losing the original fp8 type. This guard protects library users from a silent round-trip
   -- failure: without it, saving an e3m4 tensor and loading it back would interpret the bytes
   -- as e4m3 (wrong values, no error).

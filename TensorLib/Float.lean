@@ -608,8 +608,9 @@ def _root_.Float32.toFloat8E3M4Bits (f : Float32) : UInt8 :=
         sign8
       else
         let shifted := fullMant >>> totalShift.toUInt32
-        let roundBit := if totalShift > 0 then (fullMant >>> (totalShift.toUInt32 - 1)) &&& 1 else 0
-        let stickyMask := if totalShift > 1 then (1 <<< (totalShift.toUInt32 - 1)) - 1 else 0
+        -- totalShift >= 20 in this branch (realExp < -2), so always > 1
+        let roundBit := (fullMant >>> (totalShift.toUInt32 - 1)) &&& 1
+        let stickyMask := (1 <<< (totalShift.toUInt32 - 1)) - 1
         let stickyBits := fullMant &&& stickyMask
         let rounded := if roundBit == 1 && (stickyBits != 0 || shifted &&& 1 == 1)
           then shifted + 1 else shifted

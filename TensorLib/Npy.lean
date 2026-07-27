@@ -131,7 +131,7 @@ def fromNpyString (s : String) : Err Dtype :=
     -- Only littleEndian V2 is bf16. Tensor.toNpy always writes LE so this is safe.
     let name <- if nameStr == "V2" && order == .littleEndian then .ok .bfloat16
       -- Warning: "<V1" is ambiguous - ml_dtypes / Jax serialize both e3m4 and e4m3 as "<V1"
-      -- We default to e4m3 here because the npy format has no metadat to differentiate between these 2 tyoes
+      -- We default to e4m3 here because the npy format has no metadata to differentiate between these 2 types
       -- An e3m4 file produced will be silently loaded as e4m3
       -- This is a known python limitation.
       else if nameStr == "V1" && order == .littleEndian then .ok .float8_e4m3
@@ -430,6 +430,8 @@ private def Ndarray.toByteArray! (arr : Ndarray) : ByteArray :=
 
 end Save
 
+-- unreachable normally since toNpy blocks e3m4 before reaching
+-- save!, and parseFile maps V1 to e4m3. Guards against hand-constructed Ndarrays.
 def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
   if arr.header.descr.name == .float8_e3m4 then
     throw $ IO.userError "float8_e3m4 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
