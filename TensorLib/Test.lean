@@ -621,6 +621,11 @@ private def testFloat8E3M4EdgeCases : IO Bool := do
   IO.println s!"fp8_e3m4 v2 (-0): {pass}"
   checks := pass :: checks
 
+  -- -0 sign bit preserved
+  let pass := v2.toBits == 0x80000000
+  IO.println s!"fp8_e3m4 v2 (-0 sign preserved): {pass}"
+  checks := pass :: checks
+
   -- smallest subnormal: 2^(-6)
   let v3 <- IO.ofExcept (decode 3)
   let pass := v3 == Float32.ofBits 0x3C800000
@@ -639,7 +644,7 @@ private def testFloat8E3M4EdgeCases : IO Bool := do
   IO.println s!"fp8_e3m4 v5 (0.5): {pass}"
   checks := pass :: checks
 
-  -- 8 = maxSafeNat for e3m4 (well, within range)
+  -- 8 = (within range, maxSafeForNat for e3m4 is 15)
   let v6 <- IO.ofExcept (decode 6)
   let pass := v6 == Float32.ofNat 8
   IO.println s!"fp8_e3m4 v6 (8): {pass}"

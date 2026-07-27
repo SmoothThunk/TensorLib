@@ -35,7 +35,6 @@ private def float64MantissaBits : Nat := 52
 private def float16MantissaBits : Nat := 10
 private def bfloat16MantissaBits : Nat := 7
 private def float8e4m3MantissaBits : Nat := 3
-private def float8e3m4MantissaBits : Nat := 4
 private def float8e5m2MantissaBits : Nat := 2
 
 -- Add 1 to the mantissa length because of the implicit leading 1
@@ -570,8 +569,8 @@ def _root_.Float32.toFloat8E3M4Bits (f : Float32) : UInt8 :=
       -- +-inf -> +-inf in e3m4
       sign8 ||| 0x70
     else
-      -- NaN → quiet NaN in e3m4 (exp=7, mant=1)
-      sign8 ||| 0x71
+      -- NaN -> quiet NaN in e3m4 (exp=7, mant=0b1000 - quiet bit is MSB of mant)
+      sign8 ||| 0x78
   else if exp == 0 then
     -- fp32 zero or subnormal -> too small for e3m4, flush to zero
     sign8
@@ -646,6 +645,13 @@ def _root_.Float32.toFloat8E3M4Bits (f : Float32) : UInt8 :=
 #guard (Float32.ofBits 0x41780000).toFloat8E3M4Bits == (111 : UInt8)    -- 15.5 (max)
 #guard (Float32.ofBits 0x7F800000).toFloat8E3M4Bits == (112 : UInt8)    -- +inf
 #guard (Float32.ofBits 0xFF800000).toFloat8E3M4Bits == (240 : UInt8)    -- -inf
+#guard (Float32.ofBits 0x7FC00000).toFloat8E3M4Bits == (0x78 : UInt8)  -- +NaN
+-- Subnormal encode (verified against ml_dtypes)
+#guard (Float32.ofBits 0x3C800000).toFloat8E3M4Bits == (1 : UInt8)      -- 0.015625 (smallest subnormal)
+#guard (Float32.ofBits 0x3D000000).toFloat8E3M4Bits == (2 : UInt8)      -- 0.03125
+#guard (Float32.ofBits 0x3D800000).toFloat8E3M4Bits == (4 : UInt8)      -- 0.0625
+-- Negative overflow
+#guard (Float32.ofBits 0xC1800000).toFloat8E3M4Bits == (240 : UInt8)    -- -16.0 → -inf
 
 section Test
 
@@ -790,17 +796,13 @@ warning: declaration uses 'sorry'
     let f := bits.toFloat32FromFloat8E5M2
     f.toFloat8E5M2Bits == bits ∨ f != f := by plausible
 
--- Property: e3m4 round-trip (except NaN)
--- Decode -> encode should give same bits
-/--
-info: Unable to find a counter-example
----
-warning: declaration uses 'sorry'
--/
-#guard_msgs in
-  example (bits : UInt8) :
-    let f := bits.toFloat32FromFloat8E3M4
-    f.toFloat8E3M4Bits == bits ∨ f != f := by plausible
+-- Exhaustive e3m4 round-trip: decode -> encode for all 256 byte values.
+-- NaN patterns are excluded (f != f) since Lean normalizes NaN bits.
+#guard (List.range 256).all fun i =>
+  let bits := i.toUInt8
+  let f := bits.toFloat32FromFloat8E3M4
+  f.toFloat8E3M4Bits == bits || f != f
+
 end Test
 
 end TensorLib

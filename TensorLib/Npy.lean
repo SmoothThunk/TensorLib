@@ -130,8 +130,10 @@ def fromNpyString (s : String) : Err Dtype :=
     -- We only recognize "<V2" as bf16 to avoid collision with "|V2" (actual void data).
     -- Only littleEndian V2 is bf16. Tensor.toNpy always writes LE so this is safe.
     let name <- if nameStr == "V2" && order == .littleEndian then .ok .bfloat16
-      -- fp8_e4m3 stored as "<V1" by ml_dtypes but multiple fp8_exmy all use this representation.
-      -- Note that we use "<V1" for e4m3 only here.
+      -- Warning: "<V1" is ambiguous - ml_dtypes / Jax serialize both e3m4 and e4m3 as "<V1"
+      -- We default to e4m3 here because the npy format has no metadat to differentiate between these 2 tyoes
+      -- An e3m4 file produced will be silently loaded as e4m3
+      -- This is a known python limitation.
       else if nameStr == "V1" && order == .littleEndian then .ok .float8_e4m3
       else if nameStr == "f1" && order == .littleEndian then .ok .float8_e5m2
       else dtypeNameFromNpyString nameStr
@@ -430,7 +432,7 @@ end Save
 
 def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
   if arr.header.descr.name == .float8_e3m4 then
-    throw $ IO.userError "float8_e3m4 cannot be saved to npy: format uses V1 which is identical to float8_e4m3"
+    throw $ IO.userError "float8_e3m4 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
   else
     IO.FS.writeBinFile file arr.toByteArray!
 

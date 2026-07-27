@@ -414,12 +414,29 @@ def decodeFloat8E5M2 (arr : ByteArray) : Err Float32 :=
 private def encodeFloat8E5M2 (f : Float32) : ByteArray :=
   ByteArray.mk #[f.toFloat8E5M2Bits]
 
+-- Decode 1-byte fp8_e3m4 to Fp32.
+-- Centralizes the size check so callers don't need inline guards.
 def decodeFloat8E3M4 (arr : ByteArray) : Err Float32 :=
   if arr.size != 1 then .error "decoder: expected 1 byte for float8_e3m4"
   else .ok (arr.data[0]!.toFloat32FromFloat8E3M4)
 
+-- Encode fp32 to 1 byte fp8_e3m4
 private def encodeFloat8E3M4 (f : Float32) : ByteArray :=
   ByteArray.mk #[f.toFloat8E3M4Bits]
+
+-- Dispatch fp8 decode by dtype
+private def decodeFloat8 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
+  | .float8_e4m3 => decodeFloat8E4M3 arr
+  | .float8_e5m2 => decodeFloat8E5M2 arr
+  | .float8_e3m4 => decodeFloat8E3M4 arr
+  | _ => .error "decoder: expected float8 type"
+
+-- Dispatch fp8 encode by dtype
+private def encodeFloat8 (dtype : Dtype) (f : Float32) : Err ByteArray := match dtype with
+  | .float8_e4m3 => .ok (encodeFloat8E4M3 f)
+  | .float8_e5m2 => .ok (encodeFloat8E5M2 f)
+  | .float8_e3m4 => .ok (encodeFloat8E3M4 f)
+  | _ => .error "encoder: expected float8 type"
 
 def byteArrayOfNatOverflow (dtype : Dtype) (n : Nat) : ByteArray := match dtype with
 | .bool => toLEByteArray (if n == 0 then 0 else 1).toUInt8
@@ -962,144 +979,52 @@ def castOverflow (fromDtype : Dtype) (data : ByteArray) (toDtype : Dtype) : Err 
       let f <- decodeFloat16OrBFloat16 fromDtype data
       encodeFloat16OrBFloat16 toDtype f
 
-    -- float8_e4m3 to unsigned integers
-    | .float8_e4m3, .uint8 | .float8_e4m3, .uint16 | .float8_e4m3, .uint32 | .float8_e4m3, .uint64 => do
-      let f <- decodeFloat8E4M3 data
+    -- fp8 to unsigned integers
+    | .float8_e4m3, .uint8 | .float8_e4m3, .uint16 | .float8_e4m3, .uint32 | .float8_e4m3, .uint64
+    | .float8_e5m2, .uint8 | .float8_e5m2, .uint16 | .float8_e5m2, .uint32 | .float8_e5m2, .uint64
+    | .float8_e3m4, .uint8 | .float8_e3m4, .uint16 | .float8_e3m4, .uint32 | .float8_e3m4, .uint64 => do
+      let f <- decodeFloat8 fromDtype data
       return toDtype.byteArrayOfNatOverflow (saturatingNatOfFloat32 toDtype f)
-    -- float8_e4m3 to signed integers
-    | .float8_e4m3, .int8 | .float8_e4m3, .int16 | .float8_e4m3, .int32 | .float8_e4m3, .int64 => do
-      let f <- decodeFloat8E4M3 data
+    -- fp8 to signed integers
+    | .float8_e4m3, .int8 | .float8_e4m3, .int16 | .float8_e4m3, .int32 | .float8_e4m3, .int64
+    | .float8_e5m2, .int8 | .float8_e5m2, .int16 | .float8_e5m2, .int32 | .float8_e5m2, .int64
+    | .float8_e3m4, .int8 | .float8_e3m4, .int16 | .float8_e3m4, .int32 | .float8_e3m4, .int64 => do
+      let f <- decodeFloat8 fromDtype data
       return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat32 toDtype f)
-    -- float8_e4m3 to float32
-    | .float8_e4m3, .float32 => do
-      let f <- decodeFloat8E4M3 data
+    -- fp8 to float32
+    | .float8_e4m3, .float32 | .float8_e5m2, .float32 | .float8_e3m4, .float32 => do
+      let f <- decodeFloat8 fromDtype data
       return toLEByteArray f
-    -- float8_e4m3 to float64
-    | .float8_e4m3, .float64 => do
-      let f <- decodeFloat8E4M3 data
+    -- fp8 to float64
+    | .float8_e4m3, .float64 | .float8_e5m2, .float64 | .float8_e3m4, .float64 => do
+      let f <- decodeFloat8 fromDtype data
       return toLEByteArray f.toFloat
-    -- float8_e4m3 to fp16/bf16
-    | .float8_e4m3, .float16 | .float8_e4m3, .bfloat16 => do
-      let f <- decodeFloat8E4M3 data
+    -- fp8 to fp16/bf16
+    | .float8_e4m3, .float16 | .float8_e4m3, .bfloat16
+    | .float8_e5m2, .float16 | .float8_e5m2, .bfloat16
+    | .float8_e3m4, .float16 | .float8_e3m4, .bfloat16 => do
+      let f <- decodeFloat8 fromDtype data
       encodeFloat16OrBFloat16 toDtype f
-    -- float32 -> float8_e4m3
-    | .float32, .float8_e4m3 => do
+    -- fp8 to fp8 (cross-format)
+    | .float8_e4m3, .float8_e5m2 | .float8_e4m3, .float8_e3m4
+    | .float8_e5m2, .float8_e4m3 | .float8_e5m2, .float8_e3m4
+    | .float8_e3m4, .float8_e4m3 | .float8_e3m4, .float8_e5m2 => do
+      let f <- decodeFloat8 fromDtype data
+      encodeFloat8 toDtype f
+    -- float32 -> fp8
+    | .float32, .float8_e4m3 | .float32, .float8_e5m2 | .float32, .float8_e3m4 => do
       let f <- Float32.ofLEByteArray data
-      return encodeFloat8E4M3 f
-    -- float64 -> float8_e4m3: rounds twice via fp32. Can disagree with ml_dtypes at the overflow edge (eg: 464.00000000000006)
-    | .float64, .float8_e4m3 => do
+      encodeFloat8 toDtype f
+    -- float64 -> fp8 (rounds twice via fp32, can disagree with ml_dtypes at interior values)
+    | .float64, .float8_e4m3 | .float64, .float8_e5m2 | .float64, .float8_e3m4 => do
       let f <- Float.ofLEByteArray data
-      return encodeFloat8E4M3 f.toFloat32
-    -- fp16/bf16 -> float8_e4m3
-    | .float16, .float8_e4m3 | .bfloat16, .float8_e4m3 => do
+      encodeFloat8 toDtype f.toFloat32
+    -- fp16/bf16 -> fp8
+    | .float16, .float8_e4m3 | .bfloat16, .float8_e4m3
+    | .float16, .float8_e5m2 | .bfloat16, .float8_e5m2
+    | .float16, .float8_e3m4 | .bfloat16, .float8_e3m4 => do
       let f <- decodeFloat16OrBFloat16 fromDtype data
-      return encodeFloat8E4M3 f
-
-    -- float8_e5m2 to unsigned integers
-    | .float8_e5m2, .uint8
-    | .float8_e5m2, .uint16
-    | .float8_e5m2, .uint32
-    | .float8_e5m2, .uint64 => do
-      let f <- decodeFloat8E5M2 data
-      return toDtype.byteArrayOfNatOverflow (saturatingNatOfFloat32 toDtype f)
-    -- float8_e5m2 to signed integers
-    | .float8_e5m2, .int8
-    | .float8_e5m2, .int16
-    | .float8_e5m2, .int32
-    | .float8_e5m2, .int64 => do
-      let f <- decodeFloat8E5M2 data
-      return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat32 toDtype f)
-    -- float8_e5m2 to float32
-    | .float8_e5m2, .float32 => do
-      let f <- decodeFloat8E5M2 data
-      return toLEByteArray f
-    -- float8_e5m2 to float64
-    | .float8_e5m2, .float64 => do
-      let f <- decodeFloat8E5M2 data
-      return toLEByteArray f.toFloat
-    -- float8_e5m2 to fp16/bf16
-    | .float8_e5m2, .float16
-    | .float8_e5m2, .bfloat16 => do
-      let f <- decodeFloat8E5M2 data
-      encodeFloat16OrBFloat16 toDtype f
-    -- float8_e5m2 to float8_e4m3
-    | .float8_e5m2, .float8_e4m3 => do
-      let f <- decodeFloat8E5M2 data
-      return encodeFloat8E4M3 f
-    -- float32 -> float8_e5m2
-    | .float32, .float8_e5m2 => do
-      let f <- Float32.ofLEByteArray data
-      return encodeFloat8E5M2 f
-    -- float64 -> float8_e5m2
-    | .float64, .float8_e5m2 => do
-      let f <- Float.ofLEByteArray data
-      return encodeFloat8E5M2 f.toFloat32
-    -- fp16/bf16 -> float8_e5m2
-    | .float16, .float8_e5m2
-    | .bfloat16, .float8_e5m2 => do
-      let f <- decodeFloat16OrBFloat16 fromDtype data
-      return encodeFloat8E5M2 f
-    -- float8_e4m3 -> float8_e5m2
-    | .float8_e4m3, .float8_e5m2 => do
-      let f <- decodeFloat8E4M3 data
-      return encodeFloat8E5M2 f
-
-  -- float8_e3m4 to unsigned integers
-    | .float8_e3m4, .uint8
-    | .float8_e3m4, .uint16
-    | .float8_e3m4, .uint32
-    | .float8_e3m4, .uint64 => do
-      let f <- decodeFloat8E3M4 data
-      return toDtype.byteArrayOfNatOverflow (saturatingNatOfFloat32 toDtype f)
-    -- float8_e3m4 to signed integers
-    | .float8_e3m4, .int8
-    | .float8_e3m4, .int16
-    | .float8_e3m4, .int32
-    | .float8_e3m4, .int64 => do
-      let f <- decodeFloat8E3M4 data
-      return toDtype.byteArrayOfIntOverflow (saturatingIntOfFloat32 toDtype f)
-    -- float8_e3m4 to float32
-    | .float8_e3m4, .float32 => do
-      let f <- decodeFloat8E3M4 data
-      return toLEByteArray f
-    -- float8_e3m4 to float64
-    | .float8_e3m4, .float64 => do
-      let f <- decodeFloat8E3M4 data
-      return toLEByteArray f.toFloat
-    -- float8_e3m4 to fp16/bf16
-    | .float8_e3m4, .float16
-    | .float8_e3m4, .bfloat16 => do
-      let f <- decodeFloat8E3M4 data
-      encodeFloat16OrBFloat16 toDtype f
-    -- float8_e3m4 to float8_e4m3
-    | .float8_e3m4, .float8_e4m3 => do
-      let f <- decodeFloat8E3M4 data
-      return encodeFloat8E4M3 f
-    -- float8_e3m4 to float8_e5m2
-    | .float8_e3m4, .float8_e5m2 => do
-      let f <- decodeFloat8E3M4 data
-      return encodeFloat8E5M2 f
-    -- float32 -> float8_e3m4
-    | .float32, .float8_e3m4 => do
-      let f <- Float32.ofLEByteArray data
-      return encodeFloat8E3M4 f
-    -- float64 -> float8_e3m4: rounds twice via fp32. Can disagree with ml_dtypes at the overflow edge.
-    | .float64, .float8_e3m4 => do
-      let f <- Float.ofLEByteArray data
-      return encodeFloat8E3M4 f.toFloat32
-    -- fp16/bf16 -> float8_e3m4
-    | .float16, .float8_e3m4
-    | .bfloat16, .float8_e3m4 => do
-      let f <- decodeFloat16OrBFloat16 fromDtype data
-      return encodeFloat8E3M4 f
-    -- float8_e4m3 -> float8_e3m4
-    | .float8_e4m3, .float8_e3m4 => do
-      let f <- decodeFloat8E4M3 data
-      return encodeFloat8E3M4 f
-    -- float8_e5m2 -> float8_e3m4
-    | .float8_e5m2, .float8_e3m4 => do
-      let f <- decodeFloat8E5M2 data
-      return encodeFloat8E3M4 f
+      encodeFloat8 toDtype f
 
     | .float8_e3m4, .float8_e3m4 | .float8_e5m2, .float8_e5m2 | .float8_e4m3, .float8_e4m3
     | .float16, .float16 | .bfloat16, .bfloat16 | .float32, .float32 | .float64, .float64 => impossible
