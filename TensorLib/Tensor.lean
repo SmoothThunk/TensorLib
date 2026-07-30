@@ -597,6 +597,7 @@ def toNatTree! (arr : Tensor) : Format.Tree Nat := get! $ toNatTree arr
 def toFloat32Tree (arr : Tensor) : Err (Format.Tree Float32) := do
   let t <- arr.toByteArrayTree
   match arr.dtype with
+  | .float8_e2m5 => t.mapM (fun b => Dtype.decodeFloat8E2M5 b)
   | .float8_e5m2 => t.mapM (fun b => Dtype.decodeFloat8E5M2 b)
   | .float8_e4m3 => t.mapM (fun b => Dtype.decodeFloat8E4M3 b)
   | .float8_e3m4 => t.mapM (fun b => Dtype.decodeFloat8E3M4 b)
@@ -609,6 +610,7 @@ def toFloat32Tree! (arr : Tensor) : Format.Tree Float32 := get! $ toFloat32Tree 
 def toFloat64Tree (arr : Tensor) : Err (Format.Tree Float) := do
   let t <- arr.toByteArrayTree
   match arr.dtype with
+  | .float8_e2m5 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E2M5 b; return f.toFloat)
   | .float8_e5m2 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E5M2 b; return f.toFloat)
   | .float8_e4m3 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E4M3 b; return f.toFloat)
   | .float8_e3m4 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E3M4 b; return f.toFloat)

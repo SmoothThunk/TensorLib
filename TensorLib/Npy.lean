@@ -114,7 +114,7 @@ def dtypeNameToNpyString (t : TensorLib.Dtype) : String := match t with
 -- float8_e3m4 serializes as "V1" in ml_dtypes, same as e4m3.
 -- The npy format cannot distinguish between fp8 subtypes that use V1.
 -- Reading "<V1" defaults to e4m3
-| .float8_e4m3 | .float8_e3m4 => "V1"
+| .float8_e4m3 | .float8_e3m4 | .float8_e2m5 => "V1"
 | .float8_e5m2 => "f1"
 | .float16 => "f2"
 | .bfloat16 => "V2"
