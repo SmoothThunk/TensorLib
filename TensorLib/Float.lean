@@ -931,11 +931,14 @@ warning: declaration uses 'sorry'
 #guard (63 : UInt8).toFloat32FromFloat8E2M5 == Float32.ofBits 0x3F7C0000 -- 0.984375 (normal value)
 -- Takes byte 126 (0b01111110 = sign=0, exp=11, mant=11110), decodes to (1 + 30/32) × 2^1 = 3.875
 #guard (126 : UInt8).toFloat32FromFloat8E2M5 == Float32.ofBits 0x40780000 -- 3.875 (max normal)
--- Takes byte 96 (0b01100000 = sign=0, exp=11, mant=00000), decodes to +inf
+-- Takes byte 96 (0b01100000 = exp=3, mant=0), decodes to 2.0 (not inf — byte 127 is +inf)
 #guard (96 : UInt8).toFloat32FromFloat8E2M5 == Float32.ofBits 0x40000000 -- 2.0 (exp=3, mant=0 is normal, not inf)
 -- Note: NaN has to be skipped here
 -- Takes byte 64 (0b01000000 = sign=0, exp=10, mant=00000), decodes to (1+0) × 2^0 = 1.0
 #guard (64 : UInt8).toFloat32FromFloat8E2M5 == Float32.ofBits 0x3F800000 -- 1.0
+-- Encode boundary tests near max (verified against gfloat TiesToEven)
+#guard (Float32.ofBits 0x407A0000).toFloat8E2M5Bits == (126 : UInt8)    -- 3.90625 -> 3.875 (midpoint, ties to even)
+#guard (Float32.ofBits 0x407C0000).toFloat8E2M5Bits == (127 : UInt8)    -- 3.9375 -> +inf
 
 -- Exhaustive e2m5 round-trip: decode -> encode for all 256 byte values.
 -- Byte 128 is the single NaN encoding — excluded because Lean's Float32 BEq
