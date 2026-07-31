@@ -433,8 +433,8 @@ end Save
 -- unreachable normally since toNpy blocks e3m4 before reaching
 -- save!, and parseFile maps V1 to e4m3. Guards against hand-constructed Ndarrays.
 def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
-  if arr.header.descr.name == .float8_e3m4 then
-    throw $ IO.userError "float8_e3m4 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
+  if arr.header.descr.name == .float8_e3m4 || arr.header.descr.name == .float8_e2m5 then
+    throw $ IO.userError "float8_e3m4/float8_e2m5 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
   else
     IO.FS.writeBinFile file arr.toByteArray!
 

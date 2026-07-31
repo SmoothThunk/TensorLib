@@ -750,8 +750,8 @@ def _root_.Float32.toFloat8E2M5Bits (f : Float32) : UInt8 :=
       -- Subnormal value = mant × 2^(-6)
       -- Need: result_mant = fullMant >> (17 - realExp)
       let totalShift := (17 - realExp).toNat
-      if totalShift >= 24 then
-        -- All bits shifted away → flush to +0
+      if totalShift >= 25 then
+        -- All bits shifted away -> flush to +0
         0
       else
         let shifted := fullMant >>> totalShift.toUInt32
@@ -921,7 +921,7 @@ warning: declaration uses 'sorry'
 -- e2m5 decode tests (verified against P3109_8p6 spec from gfloat)
 -- takes byte 0, passes it through the decoder, and checks that the result == fp32(+0 = 0x00000000)
 #guard (0 : UInt8).toFloat32FromFloat8E2M5 == Float32.ofBits 0x00000000  -- +0 (S=0, exp=00, mant=00000)
--- Takes byte 128 (0b10000000 = sign=1, exp=00, mant=00000), decodes to fp32 -0 (0x80000000)
+-- Takes byte 128 (0b10000000 = sign=1, exp=00, mant=00000), decodes to NaN (the single NaN encoding in P3109_8p6)
 #guard (128 : UInt8).toFloat32FromFloat8E2M5.toBits == 0x7FC00000 -- NaN (the single NaN at byte 128)
 -- Takes byte 1 (0b00000001 = sign=0, exp=00, mant=00001), decodes to smallest subnormal = 0.015625
 #guard (1 : UInt8).toFloat32FromFloat8E2M5 == Float32.ofBits 0x3C800000 -- 0.015625 (min subnormal per P3109)
@@ -937,17 +937,12 @@ warning: declaration uses 'sorry'
 -- Takes byte 64 (0b01000000 = sign=0, exp=10, mant=00000), decodes to (1+0) × 2^0 = 1.0
 #guard (64 : UInt8).toFloat32FromFloat8E2M5 == Float32.ofBits 0x3F800000 -- 1.0
 
-#guard (1 : UInt8).toFloat32FromFloat8E2M5.toFloat8E2M5Bits == (1 : UInt8)
-#guard (2 : UInt8).toFloat32FromFloat8E2M5.toFloat8E2M5Bits == (2 : UInt8)
-#guard (16 : UInt8).toFloat32FromFloat8E2M5.toFloat8E2M5Bits == (16 : UInt8)
-#guard (31 : UInt8).toFloat32FromFloat8E2M5.toFloat8E2M5Bits == (31 : UInt8)
-
 -- Exhaustive e2m5 round-trip: decode -> encode for all 256 byte values.
--- Bytes 127 and 255 are NaN encodings that I found by exhaustively #guards chunk by chunk
--- excluded because Lean's Float32 BEq doesn't implement IEEE NaN != NaN.
+-- Byte 128 is the single NaN encoding — excluded because Lean's Float32 BEq
+-- doesn't implement IEEE NaN semantics.
 #guard (List.range 256).all fun i =>
   let bits := i.toUInt8
-  if bits == 127 || bits == 128 || bits == 255 then true
+  if bits == 128 then true
   else
     let f := bits.toFloat32FromFloat8E2M5
     f.toFloat8E2M5Bits == bits

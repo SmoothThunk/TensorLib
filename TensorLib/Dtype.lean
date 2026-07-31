@@ -199,7 +199,7 @@ private def joinOrdered (x y : Dtype) : Option Dtype :=
   | .float8_e3m4, .float8_e4m3 => none
   | .float8_e3m4, _ => none
   -- fp8_e2m5 has inf (like e5m2), bias = 1, max = 3.875, and 5 mantissa bits
-  -- promotoes with bool/int8/uint8 to fp32, with fp32 to fp32, with fp64 to fp64
+  -- promotoes with bool/int8/uint8 to fp8_e2m5, with fp32 to fp32, with fp64 to fp64
   | .float8_e2m5, .bool
   | .float8_e2m5, .int8
   | .float8_e2m5, .uint8 => float8_e2m5
@@ -760,9 +760,9 @@ def add (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let y <- decodeFloat8E5M2 y
     return encodeFloat8E5M2 (x + y)
   | .float8_e2m5 => do
-  let x <- decodeFloat8E2M5 x
-  let y <- decodeFloat8E2M5 y
-  return encodeFloat8E2M5 (x + y)
+    let x <- decodeFloat8E2M5 x
+    let y <- decodeFloat8E2M5 y
+    return encodeFloat8E2M5 (x + y)
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
@@ -799,9 +799,9 @@ def sub (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let y <- decodeFloat8E5M2 y
     return encodeFloat8E5M2 (x - y)
   | .float8_e2m5 => do
-  let x <- decodeFloat8E2M5 x
-  let y <- decodeFloat8E2M5 y
-  return encodeFloat8E2M5 (x - y)
+    let x <- decodeFloat8E2M5 x
+    let y <- decodeFloat8E2M5 y
+    return encodeFloat8E2M5 (x - y)
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
@@ -839,9 +839,9 @@ def mul (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let y <- decodeFloat8E5M2 y
     return encodeFloat8E5M2 (x * y)
   | .float8_e2m5 => do
-  let x <- decodeFloat8E2M5 x
-  let y <- decodeFloat8E2M5 y
-  return encodeFloat8E2M5 (x * y)
+    let x <- decodeFloat8E2M5 x
+    let y <- decodeFloat8E2M5 y
+    return encodeFloat8E2M5 (x * y)
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
@@ -879,9 +879,9 @@ def div (dtype : Dtype) (x y : ByteArray) : Err ByteArray :=
     let y <- decodeFloat8E5M2 y
     return encodeFloat8E5M2 (x / y)
   | .float8_e2m5 => do
-  let x <- decodeFloat8E2M5 x
-  let y <- decodeFloat8E2M5 y
-  return encodeFloat8E2M5 (x / y)
+    let x <- decodeFloat8E2M5 x
+    let y <- decodeFloat8E2M5 y
+    return encodeFloat8E2M5 (x / y)
   | .float16
   | .bfloat16 => do
     let x <- dtype.decodeFloat16OrBFloat16 x
