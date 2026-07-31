@@ -50,7 +50,7 @@ def maxSafeNatForFloat8e5m2 : Nat := Nat.pow 2 (float8e5m2MantissaBits + 1)
 -- integer precision
 def maxSafeNatForFloat8e3m4 : Nat := 15
 -- The formula gives 64 for e2m5 but the exponent range is too small (max value = 3.875)
--- The format overflows to inf at 4.0 so the largest integer with a lossless rountrip is 3
+-- The format overflows to inf at 4.0 so the largest integer with a lossless round-trip is 3
 def maxSafeNatForFloat8e2m5 : Nat := 3
 
 def _root_.Float32.minValue : Float32 := Float32.ofBits 0xFF7FFFFF
@@ -939,6 +939,9 @@ warning: declaration uses 'sorry'
 -- Encode boundary tests near max (verified against gfloat TiesToEven)
 #guard (Float32.ofBits 0x407A0000).toFloat8E2M5Bits == (126 : UInt8)    -- 3.90625 -> 3.875 (midpoint, ties to even)
 #guard (Float32.ofBits 0x407C0000).toFloat8E2M5Bits == (127 : UInt8)    -- 3.9375 -> +inf
+-- Negative boundary
+#guard (Float32.ofBits 0xC07A0000).toFloat8E2M5Bits == (254 : UInt8) -- -3.90625 -> -3.875 (midpoint, ties to even)
+#guard (Float32.ofBits 0xC07C0000).toFloat8E2M5Bits == (255 : UInt8) -- -3.9375 -> -inf
 
 -- Exhaustive e2m5 round-trip: decode -> encode for all 256 byte values.
 -- Byte 128 is the single NaN encoding — excluded because Lean's Float32 BEq

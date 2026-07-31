@@ -199,7 +199,7 @@ private def joinOrdered (x y : Dtype) : Option Dtype :=
   | .float8_e3m4, .float8_e4m3 => none
   | .float8_e3m4, _ => none
   -- fp8_e2m5 has inf (like e5m2), bias = 1, max = 3.875, and 5 mantissa bits
-  -- promotoes with bool/int8/uint8 to fp8_e2m5, with fp32 to fp32, with fp64 to fp64
+  -- promotes with bool/int8/uint8 to fp8_e2m5, with fp32 to fp32, with fp64 to fp64
   | .float8_e2m5, .bool
   | .float8_e2m5, .int8
   | .float8_e2m5, .uint8 => float8_e2m5
