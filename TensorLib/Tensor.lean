@@ -601,6 +601,9 @@ def toFloat32Tree (arr : Tensor) : Err (Format.Tree Float32) := do
   | .float8_e5m2 => t.mapM (fun b => Dtype.decodeFloat8E5M2 b)
   | .float8_e4m3 => t.mapM (fun b => Dtype.decodeFloat8E4M3 b)
   | .float8_e3m4 => t.mapM (fun b => Dtype.decodeFloat8E3M4 b)
+  -- e8m0 is a scale-only type, but we include a decode case here to prevent
+  -- the default branch from misinterpreting 1-byte e8m0 data as multi-byte fp32/fp64.
+  | .float8_e8m0 => t.mapM (fun b => Dtype.decodeFloat8E8M0 b)
   | .float16 => t.mapM (fun b => Dtype.byteArrayToFloat16 .float16 b)
   | .bfloat16 => t.mapM (fun b => Dtype.byteArrayToBFloat16 .bfloat16 b)
   | _ => t.mapM ( fun b => Float32.ofLEByteArray b)
@@ -614,6 +617,7 @@ def toFloat64Tree (arr : Tensor) : Err (Format.Tree Float) := do
   | .float8_e5m2 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E5M2 b; return f.toFloat)
   | .float8_e4m3 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E4M3 b; return f.toFloat)
   | .float8_e3m4 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E3M4 b; return f.toFloat)
+  | .float8_e8m0 => t.mapM (fun b => do let f <- Dtype.decodeFloat8E8M0 b; return f.toFloat)
   | .float16 => t.mapM (fun b => do let f <- Dtype.byteArrayToFloat16 .float16 b; return f.toFloat)
   | .bfloat16 => t.mapM (fun b => do let f <- Dtype.byteArrayToBFloat16 .bfloat16 b; return f.toFloat)
   | .float32 => t.mapM (fun b => do let f <- Float32.ofLEByteArray b; return f.toFloat)
@@ -683,7 +687,7 @@ def toNpy (arr : Tensor) : Err Npy.Ndarray :=
   -- Our guard helps to surface an explicit error during write instead of allowing a
   -- silent round-trip corruption — without it, a user could save an e3m4 tensor, load it back,
   -- and get wrong values (interpreted as e4m3) with no indication anything went wrong.
-  if arr.dtype == .float8_e3m4 || arr.dtype == .float8_e2m5 then .error "float8_e3m4/float8_e2m5 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
+  if arr.dtype == .float8_e3m4 || arr.dtype == .float8_e2m5 || arr.dtype == .float8_e8m0 then .error "float8_e3m4/float8_e2m5/float8_e8m0 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
   else
     let arr := if arr.isTriviallyReshapable then arr else arr.copy
     let descr := Npy.Dtype.mk arr.dtype Npy.ByteOrder.littleEndian
@@ -774,6 +778,7 @@ open TensorLib.Tensor.Format.Tree
 -- toNpy accepts e4m3 (not blocked)
 #guard match (Tensor.zeros .float8_e4m3 (Shape.mk [2])).toNpy with | .ok _ => true | .error _ => false
 #guard match (Tensor.zeros .float8_e2m5 (Shape.mk [2])).toNpy with | .error _ => true | .ok _ => false
+#guard match (Tensor.zeros .float8_e8m0 (Shape.mk [2])).toNpy with | .error _ => true | .ok _ => false
 
 end Test
 

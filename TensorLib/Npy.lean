@@ -114,8 +114,7 @@ def dtypeNameToNpyString (t : TensorLib.Dtype) : String := match t with
 -- float8_e3m4 serializes as "V1" in ml_dtypes, same as e4m3.
 -- The npy format cannot distinguish between fp8 subtypes that use V1.
 -- Reading "<V1" defaults to e4m3
-| .float8_e4m3 | .float8_e3m4 | .float8_e2m5 => "V1"
-| .float8_e5m2 => "f1"
+| .float8_e4m3 | .float8_e3m4 | .float8_e5m2 | .float8_e2m5 | .float8_e8m0 => "V1"
 | .float16 => "f2"
 | .bfloat16 => "V2"
 | .float32 => "f4"
@@ -433,8 +432,8 @@ end Save
 -- unreachable normally since toNpy blocks e3m4 before reaching
 -- save!, and parseFile maps V1 to e4m3. Guards against hand-constructed Ndarrays.
 def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
-  if arr.header.descr.name == .float8_e3m4 || arr.header.descr.name == .float8_e2m5 then
-    throw $ IO.userError "float8_e3m4/float8_e2m5 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
+  if arr.header.descr.name == .float8_e3m4 || arr.header.descr.name == .float8_e2m5 ||  arr.header.descr.name == .float8_e8m0 then
+    throw $ IO.userError "float8_e3m4/float8_e2m5/float8_e8m0 cannot be saved to npy: format uses V1 which is indistinguishable from float8_e4m3"
   else
     IO.FS.writeBinFile file arr.toByteArray!
 
@@ -448,6 +447,7 @@ def Ndarray.save! (arr : Ndarray) (file : System.FilePath) : IO Unit :=
 -- Known limitation: e3m4 cannot round-trip through npy (reads back as e4m3)
 #guard Npy.Dtype.fromNpyString "<V1" != .ok { name := .float8_e3m4, order := .littleEndian }
 #guard Npy.Dtype.dtypeNameToNpyString .float8_e4m3 == "V1"
+#guard Npy.Dtype.dtypeNameToNpyString .float8_e8m0 == "V1"
 
 end Npy
 end TensorLib
