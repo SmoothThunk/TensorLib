@@ -776,6 +776,32 @@ private def testFloat8E2M5EdgeCases : IO Bool := do
 
   return checks.all id
 
+
+-- E8M0 decode boundary values from OCP MX spec §5.4.1
+-- Exponent range: -127 to 127, bias=127, no inf, no zero, NaN=0xFF
+private def testFloat8E8M0EdgeCases : IO Bool := do
+  let mut checks : List Bool := []
+
+  -- Min value: byte 0 = 2^(-127)
+  let v <- IO.ofExcept (Dtype.decodeFloat8E8M0 (ByteArray.mk #[0]))
+  let pass := v == Float32.ofBits 0x00400000
+  IO.println s!"fp8_e8m0 byte 0 (2^-127): {pass}"
+  checks := pass :: checks
+
+  -- Identity: byte 127 = 2^0 = 1.0
+  let v <- IO.ofExcept (Dtype.decodeFloat8E8M0 (ByteArray.mk #[127]))
+  let pass := v == 1.0
+  IO.println s!"fp8_e8m0 byte 127 (1.0): {pass}"
+  checks := pass :: checks
+
+  -- Max value: byte 254 = 2^127
+  let v <- IO.ofExcept (Dtype.decodeFloat8E8M0 (ByteArray.mk #[254]))
+  let pass := v == Float32.ofBits 0x7F000000
+  IO.println s!"fp8_e8m0 byte 254 (2^127): {pass}"
+  checks := pass :: checks
+
+  return checks.all id
+
 def runAllTests : IO Bool := do
  return (<- testTensorElementBV Dtype.uint16) &&
         (<- testTensorElementBV Dtype.uint32) &&
@@ -784,7 +810,8 @@ def runAllTests : IO Bool := do
         (<- testFloat8E4M3EdgeCases) &&
         (<- testFloat8E5M2EdgeCases) &&
         (<- testFloat8E3M4EdgeCases) &&
-        (<- testFloat8E2M5EdgeCases)
+        (<- testFloat8E2M5EdgeCases) &&
+        (<- testFloat8E8M0EdgeCases)
 
 end Test
 end TensorLib

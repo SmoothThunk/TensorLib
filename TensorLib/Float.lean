@@ -656,7 +656,34 @@ def _root_.Float32.toFloat8E3M4Bits (f : Float32) : UInt8 :=
 #guard (Float32.ofBits 0x3D000000).toFloat8E3M4Bits == (2 : UInt8)      -- 0.03125
 #guard (Float32.ofBits 0x3D800000).toFloat8E3M4Bits == (4 : UInt8)      -- 0.0625
 -- Negative overflow
-#guard (Float32.ofBits 0xC1800000).toFloat8E3M4Bits == (240 : UInt8)    -- -16.0 → -inf
+#guard (Float32.ofBits 0xC1800000).toFloat8E3M4Bits == (240 : UInt8)    -- -16.0 -> -inf
+
+-- Encoder for fp8_e8m0 (scale type)
+-- Decoder for fp8_e8m0 (scale type)
+-- Reference: http://kib.kiev.ua/x86docs/Third-Parties/OCP/OCP_Microscaling%20Formats%20(MX)%20v1.0%20Spec_Final.pdf
+-- e8m0 is 8 bits unsigned bias exp (bias = 127), 0 mant bits
+-- Every value is a power of 2: 2 ^ (byte - 127)
+-- 0xFF = NaN; no Inf, no 0, no subnormals
+def _root_.UInt8.toFloat32FromFloat8E8M0 (bits: UInt8) : Float32 :=
+  -- case NaN
+  if bits == 0xFF then
+    -- byte 255 is NaN encoding acc to OCP
+    Float32.ofBits 0x7FC00000
+  else if bits == 0 then
+    -- Byte 0: 2^(-127) is a fp32 subnormal (below fp32's min normal 2^-126)
+    -- fp32 subnormal: sign=0, exp=0, mant=1<<22 gives 2^(-126) × 0.5 = 2^(-127)
+    Float32.ofBits 0x00400000
+  else
+    -- 2 ^ (byte - 127): construct fp32 bit pattern with sin = 0, exp = byte, mant = 0
+    -- fp32 value = 2 ^ (exp - 127) which is the value we want
+    Float32.ofBits (bits.toUInt32 <<< 23)
+
+-- E8M0 decode tests (verified against OCP MX spec)
+#guard (127 : UInt8).toFloat32FromFloat8E8M0 == 1.0 -- 2^(127-127) = 2^0 = 1.0
+#guard (128 : UInt8).toFloat32FromFloat8E8M0 == 2.0 -- 2^(128-127) = 2^1 = 2.0
+#guard (126 : UInt8).toFloat32FromFloat8E8M0 == 0.5 -- 2^(126-127) = 2^(-1) = 0.5
+#guard (254 : UInt8).toFloat32FromFloat8E8M0 == Float32.ofBits 0x7F000000 -- 2^127 (largest value)
+#guard (0 : UInt8).toFloat32FromFloat8E8M0 == Float32.ofBits 0x00400000 -- byte 0: fp32 exp=0, mant=0 = +0 (not 2^-127)
 
 -- Decode fp8_e2m5 (P3109_8p6) to Float32
 -- Format: sign-magnitude, 8 bits total. Positive codes 0-127, negative codes 128-255.
