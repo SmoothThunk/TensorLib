@@ -381,6 +381,16 @@ OverflowError: Python integer 128 out of bounds for int8
 
 Float types have named safe nat upper bounds.
 -/
+
+-- Maximum representable Fp32 value for each MX compute dtype.
+-- Used by quantizeMX to compute the E8M0 scale: m = fp8Max / amax.
+-- These are the actual format maxima, not the largest safe integer (see maxSafeNat).
+def fp8Max (dtype : Dtype) : Option Float32 := match dtype with
+  | .float8_e4m3 => some 448.0
+  | .float8_e5m2 => some 57344.0
+  | .float8_e3m4 => some 15.5
+  | _ => none
+
 private def maxSafeNat : Dtype -> Option Nat
 | .bool => none
 | .uint8 => some 0xFF
@@ -479,7 +489,8 @@ def decodeFloat8E8M0 (arr : ByteArray) : Err Float32 :=
 
 
 -- Dispatch fp8 decode by dtype
-private def decodeFloat8 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
+-- change from private since I need to call this in anotehr file for quantizing
+def decodeFloat8 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
   | .float8_e4m3 => decodeFloat8E4M3 arr
   | .float8_e5m2 => decodeFloat8E5M2 arr
   | .float8_e3m4 => decodeFloat8E3M4 arr
