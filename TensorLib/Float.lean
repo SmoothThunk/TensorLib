@@ -658,7 +658,7 @@ def _root_.Float32.toFloat8E3M4Bits (f : Float32) : UInt8 :=
 -- Negative overflow
 #guard (Float32.ofBits 0xC1800000).toFloat8E3M4Bits == (240 : UInt8)    -- -16.0 -> -inf
 
--- Encoder for fp8_e8m0 (scale type)
+
 -- Decoder for fp8_e8m0 (scale type)
 -- Reference: http://kib.kiev.ua/x86docs/Third-Parties/OCP/OCP_Microscaling%20Formats%20(MX)%20v1.0%20Spec_Final.pdf
 -- e8m0 is 8 bits unsigned bias exp (bias = 127), 0 mant bits
@@ -683,7 +683,8 @@ def _root_.UInt8.toFloat32FromFloat8E8M0 (bits: UInt8) : Float32 :=
 #guard (128 : UInt8).toFloat32FromFloat8E8M0 == 2.0 -- 2^(128-127) = 2^1 = 2.0
 #guard (126 : UInt8).toFloat32FromFloat8E8M0 == 0.5 -- 2^(126-127) = 2^(-1) = 0.5
 #guard (254 : UInt8).toFloat32FromFloat8E8M0 == Float32.ofBits 0x7F000000 -- 2^127 (largest value)
-#guard (0 : UInt8).toFloat32FromFloat8E8M0 == Float32.ofBits 0x00400000 -- byte 0: fp32 exp=0, mant=0 = +0 (not 2^-127)
+#guard (0 : UInt8).toFloat32FromFloat8E8M0 == Float32.ofBits 0x00400000 -- byte 0: 2^-127 as fp32 subnormal (0x00400000). Naïve bits<<23 would give +0.
+#guard (0xFF : UInt8).toFloat32FromFloat8E8M0.toBits == 0x7FC00000           -- byte 255 = NaN
 
 -- Decode fp8_e2m5 (P3109_8p6) to Float32
 -- Format: sign-magnitude, 8 bits total. Positive codes 0-127, negative codes 128-255.
