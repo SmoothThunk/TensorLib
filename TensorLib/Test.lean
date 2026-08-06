@@ -802,6 +802,76 @@ private def testFloat8E8M0EdgeCases : IO Bool := do
 
   return checks.all id
 
+-- dequantizeMX: OCP MX spec 5.1 v_i = X * P_i
+-- Tests three cases: identity scale, doubling scale, NaN scale
+private def testDequantizeMX : IO Bool := do
+  let mut checks : List Bool := []
+
+  -- scale byte 127 = 2^0 = 1.0: output should equal input
+  let qW <- IO.ofExcept (Tensor.ofFloat32List [2.0, 4.0, 6.0, 8.0])
+  let scaleData := ByteArray.mk #[127, 127]  -- two groups of 2, scale = 1.0
+  let scales := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [2], data := scaleData  : Tensor }
+  let result <- IO.ofExcept (Tensor.dequantizeMX qW scales 2)
+  let tree <- IO.ofExcept result.toFloat32Tree
+  let pass := tree == .root [2.0, 4.0, 6.0, 8.0]
+  IO.println s!"dequantizeMX identity scale (byte 127 = 1.0): {pass}"
+  checks := pass :: checks
+
+  -- scale byte 128 = 2^1 = 2.0: output should be input * 2.0
+  let scaleData2 := ByteArray.mk #[128, 128]  -- two groups of 2, scale = 2.0
+  let scales2 := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [2], data := scaleData2 : Tensor }
+  let result2 <- IO.ofExcept (Tensor.dequantizeMX qW scales2 2)
+  let tree2 <- IO.ofExcept result2.toFloat32Tree
+  let pass2 := tree2 == .root [4.0, 8.0, 12.0, 16.0]
+  IO.println s!"dequantizeMX doubling scale (byte 128 = 2.0): {pass2}"
+  checks := pass2 :: checks
+
+  -- scale byte 255 = NaN: output should be all NaN
+  let scaleData3 := ByteArray.mk #[255, 255]
+  let scales3 := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [2], data := scaleData3 : Tensor }
+  let result3 <- IO.ofExcept (Tensor.dequantizeMX qW scales3 2)
+  let tree3 <- IO.ofExcept result3.toFloat32Tree
+  let pass3 := match tree3 with
+    | .root vs => vs.all Float32.isNaN
+    | _ => false
+  IO.println s!"dequantizeMX NaN scale (byte 255): {pass3}"
+  checks := pass3 :: checks
+
+  return checks.all id
+
+-- quantizeMX: NVIDIA scale computation
+-- Tests scale byte computation and value scaling per group
+private def testQuantizeMX : IO Bool := do
+  let mut checks : List Bool := []
+
+  -- two groups with different scales
+  -- group 1: [100, 200], amax=200, m=floor_pow2(448/200)=2.0, scale byte=126, scaled=[200, 400]
+  -- group 2: [300, 800], amax=800, m=floor_pow2(448/800)=0.5, scale byte=128, scaled=[150, 400]
+  let x <- IO.ofExcept (Tensor.ofFloat32List [100.0, 200.0, 300.0, 800.0])
+  let (qW, scales) <- IO.ofExcept (Tensor.quantizeMX x 2 .float8_e4m3)
+  let scalesOk := scales.data == ByteArray.mk #[126, 128]
+  let qwOk := qW.toFloat32Tree! == .root [200.0, 400.0, 150.0, 400.0]
+  let pass := scalesOk && qwOk
+  IO.println s!"quantizeMX two groups different scales: {pass}"
+  checks := pass :: checks
+
+  -- zero group: amax=0, scale byte=127 (no-op), scaled values unchanged
+  let x2 <- IO.ofExcept (Tensor.ofFloat32List [0.0, 0.0])
+  let (qW2, scales2) <- IO.ofExcept (Tensor.quantizeMX x2 2 .float8_e4m3)
+  let pass2 := scales2.data == ByteArray.mk #[127] && qW2.toFloat32Tree! == .root [0.0, 0.0]
+  IO.println s!"quantizeMX zero group (scale byte 127): {pass2}"
+  checks := pass2 :: checks
+
+  -- negative values: sign preserved after scaling
+  -- group: [-100, -200], amax=200, m=2.0, scale byte=126, scaled=[-200, -400]
+  let x3 <- IO.ofExcept (Tensor.ofFloat32List [-100.0, -200.0])
+  let (qW3, scales3) <- IO.ofExcept (Tensor.quantizeMX x3 2 .float8_e4m3)
+  let pass3 := scales3.data == ByteArray.mk #[126] && qW3.toFloat32Tree! == .root [-200.0, -400.0]
+  IO.println s!"quantizeMX negative values sign preserved: {pass3}"
+  checks := pass3 :: checks
+
+  return checks.all id
+
 def runAllTests : IO Bool := do
  return (<- testTensorElementBV Dtype.uint16) &&
         (<- testTensorElementBV Dtype.uint32) &&
@@ -811,7 +881,9 @@ def runAllTests : IO Bool := do
         (<- testFloat8E5M2EdgeCases) &&
         (<- testFloat8E3M4EdgeCases) &&
         (<- testFloat8E2M5EdgeCases) &&
-        (<- testFloat8E8M0EdgeCases)
+        (<- testFloat8E8M0EdgeCases) &&
+        (<- testDequantizeMX) &&
+        (<- testQuantizeMX)
 
 end Test
 end TensorLib

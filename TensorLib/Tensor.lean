@@ -697,6 +697,179 @@ def toNpy (arr : Tensor) : Err Npy.Ndarray :=
     let startIndex := 0
     .ok { header, data, startIndex }
 
+-- Dequantize an MX scaled tensor: v_i = decodeE8M0(scale) x fp32(qW_i), one scale per group
+-- reconstructs the original fp32 values from a block scaled quantized tensor by multiplying each elemt by its group's decoded E8M0 scale
+def dequantizeMX (qW : Tensor) (scales : Tensor) (groupSize: Nat) : Err Tensor := do
+  -- scales tensor must be E8M0 (the only MX scale format supported by tensorlib)
+  if scales.dtype != .float8_e8m0 then .error "dequantizeMX: scales must have dtype float8_e8m0"
+  else
+  -- dequantization is defined along the last dimension so we need atleast 1
+  let lastDim <- match qW.shape.val.getLast? with
+    | none => .error "dequantizeMX: qW must have atleast one dimension"
+    | some d => .ok d
+  -- each group of groupSize elements shares one scale byte
+  if lastDim % groupSize != 0 then
+    .error "dequantizeMX: groupSize must divide the last dimension of qW"
+  else
+    -- expected scales shape same as qW but last dimension is divided by groupSize
+    let expectedScalesShape := TensorLib.Shape.mk (qW.shape.val.dropLast ++ [lastDim / groupSize])
+    if scales.shape != expectedScalesShape then
+      .error "dequantizeMX: Scales shape does not match qW shape / groupSize"
+    else
+      -- flatten both tensors to lists of raw bytes, one byteArray per element
+      let qWElems <- qW.toList
+      let scElems <- scales.toList
+      -- split qW elements into consecutive groups of groupSize
+      -- each group corresponds to one scale byte in scElems
+      let groups := List.toChunks groupSize qWElems
+      -- zip each group of qW elements with its corresponding scale byte
+      -- for each pair: decode scale, decode each element, multiply (v_i = X * P_i)
+      let resultGroups <- (groups.zip scElems).mapM fun (group, scaleBytes) => do
+        -- decode E8M0 scale byte to fp32: X = 2^(byte - 127), 0xFF -> NaN
+        let X <- Dtype.decodeFloat8E8M0 scaleBytes
+        -- for each element in the group, decode to fp32 and multiply by scale
+        group.mapM fun elemBytes => do
+          let p <- Dtype.byteArrayToFloat32 qW.dtype elemBytes
+          -- OCP MX spec §5.1: v_i = X * P_i
+          let v := X * p
+          -- pack result back as fp32 bytes
+          Dtype.byteArrayOfFloat32 .float32 v
+      -- flatten result groups back to a single list of byte array
+      let flatElems := resultGroups.flatten
+      -- concatenate all bytes into a single byte array
+      let data := flatElems.foldl (fun acc bytes => acc.append bytes) (ByteArray.emptyWithCapacity (flatElems.length * Dtype.float32.itemsize))
+      -- fp32 tensor with same shape as qW
+      return {dtype := .float32, shape := qW.shape, data := data}
+
+-- guards for tricky cases for dequantize
+-- case 1: fractional scale (byte 126 = 0.5), groupSize 1
+-- 3.0 * 0.5 = 1.5, 5.0 * 0.5 = 2.5
+#guard
+  let qW := Tensor.ofFloat32List! [3.0, 5.0]
+  let scales := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [2], data := ByteArray.mk #[126, 126] : Tensor }
+  match Tensor.dequantizeMX qW scales 1 with
+  | .error _ => false
+  | .ok result => result.toFloat32Tree! == .root [1.5, 2.5]
+
+-- case 2: different scales per group
+-- group 1: byte 128 = 2.0, so [2.0, 4.0] -> [4.0, 8.0]
+-- group 2: byte 126 = 0.5, so [6.0, 8.0] -> [3.0, 4.0]
+#guard
+  let qW := Tensor.ofFloat32List! [2.0, 4.0, 6.0, 8.0]
+  let scales := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [2], data := ByteArray.mk #[128, 126] : Tensor }
+  match Tensor.dequantizeMX qW scales 2 with
+  | .error _ => false
+  | .ok result => result.toFloat32Tree! == .root [4.0, 8.0, 3.0, 4.0]
+
+-- case 3: negative values, sign must be preserved
+-- byte 128 = 2.0, so [-2.0, -4.0] -> [-4.0, -8.0]
+#guard
+  let qW := Tensor.ofFloat32List! [-2.0, -4.0]
+  let scales := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [1], data := ByteArray.mk #[128] : Tensor }
+  match Tensor.dequantizeMX qW scales 2 with
+  | .error _ => false
+  | .ok result => result.toFloat32Tree! == .root [-4.0, -8.0]
+
+-- case 4: scale byte 0 = 2^-127 (smallest E8M0, fp32 subnormal)
+-- 1.0 * 2^-127 = fp32 subnormal 0x00400000
+#guard
+  let qW := Tensor.ofFloat32List! [1.0]
+  let scales := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [1], data := ByteArray.mk #[0] : Tensor }
+  match Tensor.dequantizeMX qW scales 1 with
+  | .error _ => false
+  | .ok result => result.toFloat32Tree! == .root [Float32.ofBits 0x00400000]
+
+-- case 5: scale byte 254 = 2^127 (largest E8M0 value)
+-- 1.0 * 2^127 = Float32.ofBits 0x7F000000
+#guard
+  let qW := Tensor.ofFloat32List! [1.0]
+  let scales := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [1], data := ByteArray.mk #[254] : Tensor }
+  match Tensor.dequantizeMX qW scales 1 with
+  | .error _ => false
+  | .ok result => result.toFloat32Tree! == .root [Float32.ofBits 0x7F000000]
+
+-- case 6: mixed NaN and non-NaN groups
+-- group 1: byte 127 = 1.0, so [2.0, 4.0] -> [2.0, 4.0]
+-- group 2: byte 255 = NaN, so [6.0, 8.0] -> [NaN, NaN] per OCP 5.1
+#guard
+  let qW := Tensor.ofFloat32List! [2.0, 4.0, 6.0, 8.0]
+  let scales := { dtype := .float8_e8m0, shape := TensorLib.Shape.mk [2], data := ByteArray.mk #[127, 255] : Tensor }
+  match Tensor.dequantizeMX qW scales 2 with
+  | .error _ => false
+  | .ok result => match result.toFloat32Tree! with
+    | .root [a, b, c, d] => a == 2.0 && b == 4.0 && c.isNaN && d.isNaN
+    | _ => false
+
+-- Quantize a fp32 tensor to MX format using NVIDIA's scale computation:
+-- m = floor_pw2(fp8Max / amax), scale byte = floor(log2(1/m)) + 127
+-- Reference: NVIDIA TensorEngine
+-- Returns (qW, scales) where qW is fp32 scaled values and scales is e8m0 byte tensor
+def quantizeMX (x : Tensor) (groupSize : Nat) (computeDtype : Dtype) : Err (Tensor × Tensor) := do
+  -- lookup fp8Max for the compute dtype -- returns none for non fp8 dtypes
+  let fp8Max <- match Dtype.fp8Max computeDtype with
+    | none => .error s!"quantizeMX: unsupported compute dtype {computeDtype}"
+    | some v => .ok v
+  -- x must be fp32
+  if x.dtype != .float32 then .error "quantizeMX: inpute tensor must be float32"
+  else
+    -- last dim must divide evenly by groupsize
+    let lastDim <- match x.shape.val.getLast? with
+      | none => .error "quantizeMX: input tensor must have >= 1 dimension"
+      | some d => .ok d
+    if lastDim % groupSize != 0 then .error "quantizeMX: groupSize must divide the last dimension of x" else
+    -- flatten x to a list of raw bytes, one ByteArray per element
+    let xElems <- x.toList
+    -- split into consecutive groups of groupSize along the last dim
+    let groups := List.toChunks groupSize xElems
+    -- for each group, compute the E8M0 scale byte using NVIDIA's formula:
+    -- m = floor_pow2(fp8Max / amax), scale byte = floor(log2(1/m)) + 127
+    let results <- groups.mapM fun group => do
+      -- decode each element to Float32
+      let vals <- group.mapM (Dtype.byteArrayToFloat32 .float32)
+      -- amax = max absolute value in the group
+      let amax := vals.foldl (fun acc v =>
+        let absV := if v < 0.0 then -v else v
+        if absV > acc then absV else acc) 0.0
+      -- compute scale byte
+      let scaleByte : UInt8 :=
+        if amax == 0.0 then
+          -- zero group: scale = 1.0, no-op
+          127
+        else if amax.isInf || amax.isNaN then
+          -- inf or NaN group: encode as NaN scale
+          255
+        else
+          -- m = floor_pow2(fp8Max / amax)
+          -- floor(log2(x)) via Float32.log2 and Float32.floor
+          let logM := (fp8Max / amax).log2.floor
+          -- scale byte encodes 1/m: s = -floor(log2(m)) + 127
+          let s := (-logM + 127.0)
+          s.toUInt8
+      -- scale qW elements: qW_i = x_i * m = x_i * 2^(-logM)
+      -- scale qW elements: qW_i = x_i * m = x_i * 2^(logM)
+      -- use m=1.0 for zero/inf/NaN groups to avoid dividing by zero
+      let scaledVals <- group.mapM fun elemBytes => do
+        let v <- Dtype.byteArrayToFloat32 .float32 elemBytes
+        let m := if amax == 0.0 || amax.isInf || amax.isNaN then 1.0
+                  else Float32.pow 2.0 (fp8Max / amax).log2.floor
+        Dtype.byteArrayOfFloat32 .float32 (v * m)
+      return (scaledVals, scaleByte)
+    -- separate scaled values and bytes from results
+    let scaledGroups := results.map Prod.fst
+    let scaleBytes := results.map Prod.snd
+    -- flatten scaled groups into a single ByteArray for qW
+    let flatScaled := scaledGroups.flatten
+    let qwData := flatScaled.foldl (fun acc bytes => acc.append bytes)
+                    (ByteArray.emptyWithCapacity (flatScaled.length * Dtype.float32.itemsize))
+    -- pack scale bytes into a ByteArray for scales tensor
+    let scaleData := ByteArray.mk (scaleBytes.toArray)
+    -- qW has same shape as x, scales has last dim divided by groupSize
+    let scalesShape := TensorLib.Shape.mk (x.shape.val.dropLast ++ [x.shape.val.getLast?.getD 0 / groupSize])
+    return (
+      { dtype := .float32, shape := x.shape, data := qwData },
+      { dtype := .float8_e8m0, shape := scalesShape, data := scaleData }
+    )
+
 section Test
 
 open TensorLib.Tensor.Format.Tree
@@ -779,6 +952,8 @@ open TensorLib.Tensor.Format.Tree
 #guard match (Tensor.zeros .float8_e4m3 (Shape.mk [2])).toNpy with | .ok _ => true | .error _ => false
 #guard match (Tensor.zeros .float8_e2m5 (Shape.mk [2])).toNpy with | .error _ => true | .ok _ => false
 #guard match (Tensor.zeros .float8_e8m0 (Shape.mk [2])).toNpy with | .error _ => true | .ok _ => false
+
+
 
 end Test
 
