@@ -701,14 +701,16 @@ def toNpy (arr : Tensor) : Err Npy.Ndarray :=
 -- reconstructs the original fp32 values from a block scaled quantized tensor by multiplying each elemt by its group's decoded E8M0 scale
 def dequantizeMX (qW : Tensor) (scales : Tensor) (groupSize: Nat) : Err Tensor := do
   -- scales tensor must be E8M0 (the only MX scale format supported by tensorlib)
-  if scales.dtype != .float8_e8m0 then .error "dequantizeMX: scales must have dtype float8_e8m0"
+  if qW.dtype != .float32 then .error "dequantizeMX: qW must have dtype float32"
+  else if scales.dtype != .float8_e8m0 then .error "dequantizeMX: scales must have dtype float8_e8m0"
   else
   -- dequantization is defined along the last dimension so we need atleast 1
   let lastDim <- match qW.shape.val.getLast? with
     | none => .error "dequantizeMX: qW must have atleast one dimension"
     | some d => .ok d
   -- each group of groupSize elements shares one scale byte
-  if lastDim % groupSize != 0 then
+  if groupSize == 0 then .error "dequantizeMX: groupSize must be positive"
+  else if lastDim % groupSize != 0 then
     .error "dequantizeMX: groupSize must divide the last dimension of qW"
   else
     -- expected scales shape same as qW but last dimension is divided by groupSize
@@ -816,7 +818,8 @@ def quantizeMX (x : Tensor) (groupSize : Nat) (computeDtype : Dtype) : Err (Tens
     let lastDim <- match x.shape.val.getLast? with
       | none => .error "quantizeMX: input tensor must have >= 1 dimension"
       | some d => .ok d
-    if lastDim % groupSize != 0 then .error "quantizeMX: groupSize must divide the last dimension of x" else
+    if groupSize == 0 then .error "quantizeMX: groupSize must be positive"
+    else if lastDim % groupSize != 0 then .error "quantizeMX: groupSize must divide the last dimension of x" else
     -- flatten x to a list of raw bytes, one ByteArray per element
     let xElems <- x.toList
     -- split into consecutive groups of groupSize along the last dim
@@ -839,19 +842,23 @@ def quantizeMX (x : Tensor) (groupSize : Nat) (computeDtype : Dtype) : Err (Tens
           -- inf or NaN group: encode as NaN scale
           255
         else
-          -- m = floor_pow2(fp8Max / amax)
-          -- floor(log2(x)) via Float32.log2 and Float32.floor
-          let logM := (fp8Max / amax).log2.floor
-          -- scale byte encodes 1/m: s = -floor(log2(m)) + 127
-          let s := (-logM + 127.0)
-          s.toUInt8
-      -- scale qW elements: qW_i = x_i * m = x_i * 2^(-logM)
+          let ratio := fp8Max / amax
+          if ratio.isInf then 254 -- amax too small so we use max scale byte
+          else
+            let logM := ratio.log2.floor
+            let s := (-logM + 127.0)
+            if s < 0.0 then 0
+            else if s > 254.0 then 254
+            else s.toUInt8
       -- scale qW elements: qW_i = x_i * m = x_i * 2^(logM)
       -- use m=1.0 for zero/inf/NaN groups to avoid dividing by zero
       let scaledVals <- group.mapM fun elemBytes => do
         let v <- Dtype.byteArrayToFloat32 .float32 elemBytes
         let m := if amax == 0.0 || amax.isInf || amax.isNaN then 1.0
-                  else Float32.pow 2.0 (fp8Max / amax).log2.floor
+                  else
+                    let ratio := fp8Max / amax
+                    if ratio.isInf then Float32.ofBits 0x7F000000 -- 2 ^ 127
+                    else Float32.pow 2.0 ratio.log2.floor
         Dtype.byteArrayOfFloat32 .float32 (v * m)
       return (scaledVals, scaleByte)
     -- separate scaled values and bytes from results

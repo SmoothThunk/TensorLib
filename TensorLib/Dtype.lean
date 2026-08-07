@@ -263,6 +263,7 @@ def join (x y : Dtype) : Option Dtype :=
 
 -- Can we cast from one dtype to another without losing information
 def lossless (fromDtype toDtype : Dtype) : Bool := match fromDtype, toDtype with
+| .bool, .float8_e8m0 => false
 | .bool, _ => true
 | _, .bool => false
 | .int8, .int8
@@ -489,8 +490,7 @@ def decodeFloat8E8M0 (arr : ByteArray) : Err Float32 :=
 
 
 -- Dispatch fp8 decode by dtype
--- change from private since I need to call this in anotehr file for quantizing
-def decodeFloat8 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
+private def decodeFloat8 (dtype : Dtype) (arr : ByteArray) : Err Float32 := match dtype with
   | .float8_e4m3 => decodeFloat8E4M3 arr
   | .float8_e5m2 => decodeFloat8E5M2 arr
   | .float8_e3m4 => decodeFloat8E3M4 arr
@@ -1164,6 +1164,7 @@ def roundToComputeDtype (v : Float32) (dtype : Dtype) : Err Float32 := match dty
   | .float8_e4m3 => decodeFloat8E4M3 (ByteArray.mk #[v.toFloat8E4M3Bits])
   | .float8_e5m2 => decodeFloat8E5M2 (ByteArray.mk #[v.toFloat8E5M2Bits])
   | .float8_e3m4 => decodeFloat8E3M4 (ByteArray.mk #[v.toFloat8E3M4Bits])
+  -- TODO: add fp8_e2m5 when the PR is merged
   -- encode fp32 -> fp16 bits, then decode fp16 bits -> fp32
   | .float16  => byteArrayToFloat16  .float16  (toLEByteArray v.toFloat16Bits)
   -- encode fp32 -> bf16 bits, then decode bf16 bits -> fp32
@@ -1439,7 +1440,7 @@ private def canCastLosslessRoundTrip (fromDtype : Dtype) (data : ByteArray) (toD
   | .error _ => false
 
 private def canCastLosslessIntRoundTrip (fromDtype : Dtype) (n : Int) (toDtype : Dtype) : Bool :=
-  if fromDtype == .float8_e8m0 || toDtype == .float8_e8m0 then true
+  if fromDtype == .float8_e8m0 || toDtype == .float8_e8m0 then false
   else
     let res := do
       let n <- fromDtype.byteArrayOfInt n
@@ -1510,8 +1511,9 @@ warning: declaration uses 'sorry'
 -/
 #guard_msgs in
 example (fromDtype toDtype : Dtype) (n : Nat) :
-  canCastLosslessIntRoundTrip fromDtype 0 toDtype &&
-  canCastLosslessIntRoundTrip fromDtype 1 toDtype
+  fromDtype == .float8_e8m0 || toDtype == .float8_e8m0 ||
+  (canCastLosslessIntRoundTrip fromDtype 0 toDtype &&
+  canCastLosslessIntRoundTrip fromDtype 1 toDtype)
   := by plausible
 
 /--
@@ -1523,7 +1525,7 @@ warning: declaration uses 'sorry'
 -- One dtype should always go back and forth
 -- skip values outside dtypes range since they cannot be encoded in the first place.
 example (dtype : Dtype) (n : Nat) :
-  if n > dtype.maxSafeNat.getD n then true else canCastLosslessIntRoundTrip dtype n dtype := by plausible
+  dtype == .float8_e8m0 || (if n > dtype.maxSafeNat.getD n then true else canCastLosslessIntRoundTrip dtype n dtype) := by plausible
 
 /--
 info: Unable to find a counter-example
