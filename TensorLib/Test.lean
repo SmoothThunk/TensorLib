@@ -870,6 +870,13 @@ private def testQuantizeMX : IO Bool := do
   IO.println s!"quantizeMX negative values sign preserved: {pass3}"
   checks := pass3 :: checks
 
+  -- subnormal amax: ratio overflows to inf, should use max multiplier with scale byte 0 (= 2^-127)
+  let x4 <- IO.ofExcept (Tensor.ofFloat32List [Float32.ofBits 0x00000001])  -- smallest fp32 subnormal
+  let (_, scales4) <- IO.ofExcept (Tensor.quantizeMX x4 1 .float8_e4m3)
+  let pass := scales4.data == ByteArray.mk #[0]
+  IO.println s!"quantizeMX subnormal amax (scale byte 0 = 2^-127): {pass}"
+  checks := pass :: checks
+
   return checks.all id
 
 -- roundToComputeDtype: encode to compute dtype then decode back to fp32
