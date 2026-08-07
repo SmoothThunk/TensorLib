@@ -894,11 +894,13 @@ private def testRoundToComputeDtype : IO Bool := do
   let v <- IO.ofExcept (Dtype.roundToComputeDtype 500.0 .float8_e4m3)
   let pass := v != v  -- IEEE NaN property: NaN != NaN
   IO.println s!"roundToComputeDtype 500.0 e4m3 (overflows to NaN): {pass}"
+  checks := pass :: checks
 
   -- 2.3 rounds up to 2.5 in E5M2 (representable values: 2.0, 2.5; midpoint=2.25, 2.3 > 2.25)
   let v <- IO.ofExcept (Dtype.roundToComputeDtype 2.3 .float8_e5m2)
   let pass := v == 2.5
   IO.println s!"roundToComputeDtype 2.3 e5m2 (rounds to 2.5): {pass}"
+  checks := pass :: checks
 
   -- zero is always exactly representable
   let v <- IO.ofExcept (Dtype.roundToComputeDtype 0.0 .float8_e4m3)
