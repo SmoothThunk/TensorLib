@@ -830,36 +830,21 @@ def quantizeMX (x : Tensor) (groupSize : Nat) (computeDtype : Dtype) : Err (Tens
       -- decode each element to Float32
       let vals <- group.mapM (Dtype.byteArrayToFloat32 .float32)
       -- amax = max absolute value in the group
-      let amax := vals.foldl (fun acc v =>
-        let absV := if v < 0.0 then -v else v
-        if absV > acc then absV else acc) 0.0
-      -- compute scale byte
-      let scaleByte : UInt8 :=
-        if amax == 0.0 then
-          -- zero group: scale = 1.0, no-op
-          127
-        else if amax.isInf || amax.isNaN then
-          -- inf or NaN group: encode as NaN scale
-          255
+      let amax := vals.foldl (fun acc v => if v.abs > acc then v.abs else acc) 0.0
+      -- compute scale byte and multiplier together (avoids recomputing ratio/logM)
+      let ratio := fp8Max / amax
+      let (scaleByte, m) : UInt8 × Float32 :=
+        if amax == 0.0 then (127, 1.0)
+        else if amax.isInf || amax.isNaN then (255, 1.0)
+        else if ratio.isInf then (254, Float32.ofBits 0x7F000000)
         else
-          let ratio := fp8Max / amax
-          if ratio.isInf then 254 -- amax too small so we use max scale byte
-          else
-            let logM := ratio.log2.floor
-            let s := (-logM + 127.0)
-            if s < 0.0 then 0
-            else if s > 254.0 then 254
-            else s.toUInt8
-      -- scale qW elements: qW_i = x_i * m = x_i * 2^(logM)
-      -- use m=1.0 for zero/inf/NaN groups to avoid dividing by zero
-      let scaledVals <- group.mapM fun elemBytes => do
-        let v <- Dtype.byteArrayToFloat32 .float32 elemBytes
-        let m := if amax == 0.0 || amax.isInf || amax.isNaN then 1.0
-                  else
-                    let ratio := fp8Max / amax
-                    if ratio.isInf then Float32.ofBits 0x7F000000 -- 2 ^ 127
-                    else Float32.pow 2.0 ratio.log2.floor
-        Dtype.byteArrayOfFloat32 .float32 (v * m)
+          let logM := ratio.log2.floor
+          let s := (-logM + 127.0)
+          let byte := if s < 0.0 then 0
+                      else if s > 254.0 then 254
+                      else s.toUInt8
+          (byte, Float32.pow 2.0 logM)
+        let scaledVals <- vals.mapM fun v => Dtype.byteArrayOfFloat32 .float32 (v * m)
       return (scaledVals, scaleByte)
     -- separate scaled values and bytes from results
     let scaledGroups := results.map Prod.fst
@@ -871,7 +856,7 @@ def quantizeMX (x : Tensor) (groupSize : Nat) (computeDtype : Dtype) : Err (Tens
     -- pack scale bytes into a ByteArray for scales tensor
     let scaleData := ByteArray.mk (scaleBytes.toArray)
     -- qW has same shape as x, scales has last dim divided by groupSize
-    let scalesShape := TensorLib.Shape.mk (x.shape.val.dropLast ++ [x.shape.val.getLast?.getD 0 / groupSize])
+    let scalesShape := TensorLib.Shape.mk (x.shape.val.dropLast ++ [lastDim / groupSize])
     return (
       { dtype := .float32, shape := x.shape, data := qwData },
       { dtype := .float8_e8m0, shape := scalesShape, data := scaleData }
