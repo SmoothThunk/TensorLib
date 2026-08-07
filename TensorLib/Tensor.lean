@@ -812,7 +812,7 @@ def quantizeMX (x : Tensor) (groupSize : Nat) (computeDtype : Dtype) : Err (Tens
     | none => .error s!"quantizeMX: unsupported compute dtype {computeDtype}"
     | some v => .ok v
   -- x must be fp32
-  if x.dtype != .float32 then .error "quantizeMX: inpute tensor must be float32"
+  if x.dtype != .float32 then .error "quantizeMX: input tensor must be float32"
   else
     -- last dim must divide evenly by groupsize
     let lastDim <- match x.shape.val.getLast? with
@@ -830,7 +830,9 @@ def quantizeMX (x : Tensor) (groupSize : Nat) (computeDtype : Dtype) : Err (Tens
       -- decode each element to Float32
       let vals <- group.mapM (Dtype.byteArrayToFloat32 .float32)
       -- amax = max absolute value in the group
-      let amax := vals.foldl (fun acc v => if v.abs > acc then v.abs else acc) 0.0
+      let hasNaN := vals.any (fun v => v != v)  -- IEEE: NaN != NaN
+      let amax := if hasNaN then Float32.ofBits 0x7FC00000  -- NaN
+        else vals.foldl (fun acc v => if v.abs > acc then v.abs else acc) 0.0
       -- compute scale byte and multiplier together (avoids recomputing ratio/logM)
       let ratio := fp8Max / amax
       let (scaleByte, m) : UInt8 × Float32 :=
