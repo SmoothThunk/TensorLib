@@ -877,6 +877,13 @@ private def testQuantizeMX : IO Bool := do
   IO.println s!"quantizeMX subnormal amax (scale byte 0 = 2^-127): {pass}"
   checks := pass :: checks
 
+  -- NaN input: group with NaN should emit scale byte 255 (OCP NaN sentinel)
+  let xNaN <- IO.ofExcept (Tensor.ofFloat32List [Float32.ofBits 0x7FC00000, 1.0])
+  let (_, scalesNaN) <- IO.ofExcept (Tensor.quantizeMX xNaN 2 .float8_e4m3)
+  let passNaN := scalesNaN.data == ByteArray.mk #[255]
+  IO.println s!"quantizeMX NaN input group (scale byte 255): {passNaN}"
+  checks := passNaN :: checks
+
   return checks.all id
 
 -- roundToComputeDtype: encode to compute dtype then decode back to fp32
