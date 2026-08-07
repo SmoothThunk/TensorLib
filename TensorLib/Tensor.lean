@@ -836,7 +836,7 @@ def quantizeMX (x : Tensor) (groupSize : Nat) (computeDtype : Dtype) : Err (Tens
       let (scaleByte, m) : UInt8 × Float32 :=
         if amax == 0.0 then (127, 1.0)
         else if amax.isInf || amax.isNaN then (255, 1.0)
-        else if ratio.isInf then (254, Float32.ofBits 0x7F000000)
+        else if ratio.isInf then (0, Float32.ofBits 0x7F000000)
         else
           let logM := ratio.log2.floor
           let s := (-logM + 127.0)
