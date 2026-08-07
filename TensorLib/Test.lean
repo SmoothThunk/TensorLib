@@ -872,6 +872,54 @@ private def testQuantizeMX : IO Bool := do
 
   return checks.all id
 
+-- roundToComputeDtype: encode to compute dtype then decode back to fp32
+-- Exactly representable values: no rounding error (these happen to land on the format's grid)
+-- Non-representable values: rounding error introduced by quantization
+private def testRoundToComputeDtype : IO Bool := do
+  let mut checks : List Bool := []
+
+  -- exactly representable value: no rounding
+  let v <- IO.ofExcept (Dtype.roundToComputeDtype 3.0 .float8_e4m3)
+  let pass := v == 3.0
+  IO.println s!"roundToComputeDtype 3.0 e4m3 (exact): {pass}"
+  checks := pass :: checks
+
+  -- 3.1 rounds down to 3.0 (midpoint is 3.125)
+  let v <- IO.ofExcept (Dtype.roundToComputeDtype 3.1 .float8_e4m3)
+  let pass := v == 3.0
+  IO.println s!"roundToComputeDtype 3.1 e4m3 (rounds to 3.0): {pass}"
+  checks := pass :: checks
+
+  -- 500.0 overflows to NaN in e4m3 (e4m3fn has no infinity, overflow = NaN)
+  let v <- IO.ofExcept (Dtype.roundToComputeDtype 500.0 .float8_e4m3)
+  let pass := v != v  -- IEEE NaN property: NaN != NaN
+  IO.println s!"roundToComputeDtype 500.0 e4m3 (overflows to NaN): {pass}"
+
+  -- 2.3 rounds up to 2.5 in E5M2 (representable values: 2.0, 2.5; midpoint=2.25, 2.3 > 2.25)
+  let v <- IO.ofExcept (Dtype.roundToComputeDtype 2.3 .float8_e5m2)
+  let pass := v == 2.5
+  IO.println s!"roundToComputeDtype 2.3 e5m2 (rounds to 2.5): {pass}"
+
+  -- zero is always exactly representable
+  let v <- IO.ofExcept (Dtype.roundToComputeDtype 0.0 .float8_e4m3)
+  let pass := v == 0.0
+  IO.println s!"roundToComputeDtype 0.0 e4m3 (exact zero): {pass}"
+  checks := pass :: checks
+
+  -- sign preserved
+  let v <- IO.ofExcept (Dtype.roundToComputeDtype (-3.0) .float8_e4m3)
+  let pass := v == -3.0
+  IO.println s!"roundToComputeDtype -3.0 e4m3 (sign preserved): {pass}"
+  checks := pass :: checks
+
+  -- fp16 round-trip for exactly representable value
+  let v <- IO.ofExcept (Dtype.roundToComputeDtype 1.5 .float16)
+  let pass := v == 1.5
+  IO.println s!"roundToComputeDtype 1.5 float16 (exact): {pass}"
+  checks := pass :: checks
+
+  return checks.all id
+
 def runAllTests : IO Bool := do
  return (<- testTensorElementBV Dtype.uint16) &&
         (<- testTensorElementBV Dtype.uint32) &&
@@ -883,7 +931,8 @@ def runAllTests : IO Bool := do
         (<- testFloat8E2M5EdgeCases) &&
         (<- testFloat8E8M0EdgeCases) &&
         (<- testDequantizeMX) &&
-        (<- testQuantizeMX)
+        (<- testQuantizeMX) &&
+        (<- testRoundToComputeDtype)
 
 end Test
 end TensorLib

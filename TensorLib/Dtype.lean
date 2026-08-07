@@ -1155,6 +1155,25 @@ def logicalNot : Dtype -> ByteArray -> Err Bool := isZero
 #guard Dtype.float32.isZero! $ toLEByteArray (-0.0 : Float32)
 #guard Dtype.float64.isZero! $ toLEByteArray (-0.0 : Float)
 
+-- Round a Float32 value to the nearest representable value in the given compute dtype.
+-- Does this by encoding to the dtype's bit pattern then decoding back to Float32.
+-- This captures the element rounding error introduced by quantization.
+-- Returns Err because not all dtypes are valid compute dtypes (e.g. float8_e8m0 is scale-only).
+def roundToComputeDtype (v : Float32) (dtype : Dtype) : Err Float32 := match dtype with
+  -- encode fp32 -> fp8 bits, then decode fp8 bits -> fp32
+  | .float8_e4m3 => decodeFloat8E4M3 (ByteArray.mk #[v.toFloat8E4M3Bits])
+  | .float8_e5m2 => decodeFloat8E5M2 (ByteArray.mk #[v.toFloat8E5M2Bits])
+  | .float8_e3m4 => decodeFloat8E3M4 (ByteArray.mk #[v.toFloat8E3M4Bits])
+  -- encode fp32 -> fp16 bits, then decode fp16 bits -> fp32
+  | .float16  => byteArrayToFloat16  .float16  (toLEByteArray v.toFloat16Bits)
+  -- encode fp32 -> bf16 bits, then decode bf16 bits -> fp32
+  | .bfloat16 => byteArrayToBFloat16 .bfloat16 (toLEByteArray v.toBFloat16Bits)
+  -- float32 round-trip is identity (no precision loss)
+  | .float32  => .ok v
+  -- float8_e8m0 is a scale-only type, not a compute dtype
+  | .float8_e8m0 => .error "roundToComputeDtype: float8_e8m0 is a scale-only type"
+  | _ => .error s!"roundToComputeDtype: unsupported dtype {dtype}"
+
 private def logicalBinop (f : Bool -> Bool -> Bool) (t1 : Dtype) (x1 : ByteArray) (t2 : Dtype) (x2 : ByteArray) : Err Bool := do
   let z1 <- t1.nonZero x1
   let z2 <- t2.nonZero x2
@@ -1296,6 +1315,7 @@ def rightShift : Dtype -> ByteArray -> ByteArray -> Err ByteArray :=
 
 def rightShift! (dtype : Dtype) (bits : ByteArray) (shiftAmount : ByteArray) : ByteArray :=
   get! $ rightShift dtype bits shiftAmount
+
 
 section Bitwise
 
